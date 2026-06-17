@@ -1,0 +1,7 @@
+ipykernel
+pandas
+matplotlib
+numpy
+yfinance
+cvxpy
+pytest
