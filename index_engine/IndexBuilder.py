@@ -7,15 +7,17 @@ from index_engine.selection import TopNSelector, TopPercentileSelector
 from index_engine.weighting import MarketCapStrategy, EqualWeightsStrategy
 from index_engine.rebalance import RebalanceRule
 from index_engine.constraints import Constraints, NoConstraints
+import pandas as pd 
 
 UNIVERSE_REGISTRY = {
     "S&P500": SP500Universe("S&P500", YahooFinanceProvider())
 }
 
 class IndexBuilder:
-    def __init__(self, name: str, universe_name: str = None):
+    def __init__(self, name: str, universe_name: str, base_date : pd.Timestamp | str, base_value: float = 1000):
         self.name = name
-
+        self.base_date = pd.Timestamp(base_date)
+        self.base_value = base_value
         if universe_name in UNIVERSE_REGISTRY.keys():
             self.universe = UNIVERSE_REGISTRY[universe_name]
         else:
@@ -74,7 +76,9 @@ class IndexBuilder:
     
     def weight(self, method: str)->IndexBuilder:
         """
-        Ajoute la stratégie de weighting.
+        Ajoute la stratégie de weighting. Méthodes disponibles:
+        - equal_weights
+        - market_cap
         """
         if method == "equal_weights":
             self.weighter = EqualWeightsStrategy()
@@ -86,7 +90,10 @@ class IndexBuilder:
 
     def rebalance(self, frequency: str)->IndexBuilder:
         """
-        Ajoute la règle de rebalancement de l'indice.
+        Ajoute la règle de rebalancement de l'indice. Fréquences disponibles:
+        - MS
+        - YS
+        - QS
         """
         market_days = self.universe.get_market_days() # datetimeindex
         self.rule = RebalanceRule(frequency, market_days)
@@ -105,7 +112,10 @@ class IndexBuilder:
         Construis l'indice. Renvoie un objet de type Index.
         """
         index = Index(
+            self.name,
             self.universe,
+            self.base_date,
+            self.base_value,
             self.filters,
             self.scorer,
             self.selector,

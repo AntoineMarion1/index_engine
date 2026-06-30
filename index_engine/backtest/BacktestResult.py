@@ -1,34 +1,68 @@
-from index_engine import IndexComposition
-from index_engine.universe import Universe
+"""
+Module contenant la classe Basktestresult.
+"""
+
 from datetime import timedelta
+from io import BytesIO
+
+import base64
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
 
+from index_engine import IndexComposition
+from index_engine.universe import Universe
+from index_engine.error import DateError
+from index_engine.metrics import Metric
+
 class BacktestResult:
-    def __init__(self, universe: Universe, dates: pd.DatetimeIndex, start: pd.Timestamp, end: pd.Timestamp):
-        self.universe : Universe = universe
+    """
+    Classe permettant de stocker les résultats d'un backtest.
+    """
+    def __init__(
+            self,
+            name: str,
+            universe: Universe,
+            base_date: pd.Timestamp,
+            base_value: float,
+            dates: pd.DatetimeIndex,
+            start: pd.Timestamp,
+            end: pd.Timestamp
+        ):
+        self.name       : str = name
+        self.universe   : Universe = universe
+        self.base_date  : pd.Timestamp = base_date
+        self.base_value : float = base_value
         self.index_comp : dict = {}
-        self.start : pd.Timestamp = start
-        self.end : pd.Timestamp = end
-        self.rebalance_dates : pd.DatetimeIndex = dates 
+        self.start      : pd.Timestamp = start
+        self.end        : pd.Timestamp = end
+        self.rebalance_dates : pd.DatetimeIndex = dates
+
+        if self.start < self.base_date:
+            raise DateError("Le début du backtest est antérieur à la date d'initialisation de l'indice")
 
         # calculer les jours de cotation entre start
         # et end, sachant qu'il ne faut prendre que les jours
         # de cotation en compte
         all_market_days = self.universe.get_market_days()
         self.days : pd.DatetimeIndex = all_market_days[
-            (all_market_days >= self.start) &
+            (all_market_days >= self.base_date) &
             (all_market_days <= self.end)
         ]
 
         self.returns : pd.Series | None = None
         self.values : pd.Series | None = None
-        
+        self.metrics: list | None = None
+
     def add_rebalance(self, date: pd.Timestamp, index_composition: IndexComposition):
+        """
+        Ajouter une composition de l'indice à une date donnée.
+        """
+        if date in self.index_comp:
+            raise ValueError(f"Il y a déjà un rebalancement qui a été calculé le {date}.")
         self.index_comp[date]=index_composition
 
-    def _compute_index_values(self, basis: float = 100.0)->pd.Series:
+    def compute_index_values(self)->pd.Series:
         """
         Calcule la valeur de l'indice à chaque date entre 
         start et end. Renvoie une pd.Series contenant les
@@ -93,44 +127,92 @@ class BacktestResult:
         # créer la series des returns
         self.returns = pd.Series(index_returns)
         # calculer les I(t+1) = I(t)*R(t, t+1)
-        self.values = basis * (1 + self.returns).cumprod()
+        self.values = self.base_value * (1 + self.returns).cumprod()
 
         return self.values
         
     def get_dates(self)->pd.Series:
+        """
+        Renvoie les dates de rebalancement du backtest.
+        """
         return self.rebalance_dates
     
-    def plot_returns(self)->None: 
-        fig, ax1 = plt.subplots(figsize=(12, 6))
+    def _filter_to_period(self, series: pd.Series) -> pd.Series:
+        """Filtre une Series sur la période [start, end] de façon robuste,
+        même si start/end ne sont pas des market days."""
+        mask = (series.index >= self.start) & (series.index <= self.end)
+        return series[mask]
 
-        # Série 1 : valeur de l'indice
-        ax1.plot(self.values.index, self.values, color="blue", label="Indice")
+    def plot_returns(self, display = True) -> None:
+        """
+        Afficher la performance de l'indice entre start et end.
+        """
+        # Filtrer sur [start, end] uniquement
+        values  = self._filter_to_period(self.values)
+        returns = self._filter_to_period(self.returns)
+
+        _, ax1 = plt.subplots(figsize=(12, 6))
+
+        ax1.plot(values.index, values, color="blue", label="Indice")
         ax1.set_ylabel("Valeur de l'indice", color="blue")
         ax1.tick_params(axis="y", labelcolor="blue")
 
-        # Axe secondaire
         ax2 = ax1.twinx()
-
-        # Série 2 : performance
-        ax2.plot(self.returns.index, self.returns * 100, color="green", label="Perf (%)")
+        ax2.plot(returns.index, returns * 100, color="green", label="Perf (%)")
         ax2.set_ylabel("Performance (%)", color="green")
         ax2.tick_params(axis="y", labelcolor="green")
 
-        plt.title(f"Indice : valeur vs performance")
+        plt.title("Indice : valeur vs performance")
         plt.grid(True)
-        plt.show()
+
+        if display: 
+            plt.show()
+        else:
+            # ← Remplace plt.show() par ça
+            buf = BytesIO()
+            plt.savefig(buf, format="png", bbox_inches="tight")
+            plt.close()  # Libère la mémoire
+            chart_b64 = base64.b64encode(buf.getvalue()).decode()
+            return chart_b64
+        
+    def plot_drawdown(self, display = True):
+        """
+        Affiche le graphique du drawdown de la série des valeurs.
+        """
+        running_max = self.values.cummax()
+        drawdown = 100*(self.values / running_max - 1)
+
+        _, ax1 = plt.subplots(figsize=(12, 6))
+
+        ax1.plot(self.values.index, drawdown, color="red", label="Drawdown")
+        ax1.set_ylabel("Drawdown (%)", color="blue")
+        ax1.tick_params(axis="y", labelcolor="blue")
+
+        plt.title("Drawdown de l'indice")
+        plt.grid(True)
+
+        if display:
+            plt.show()
+        else:
+            buf = BytesIO()
+            plt.savefig(buf, format="png", bbox_inches="tight")
+            plt.close()  # Libère la mémoire
+            chart_b64 = base64.b64encode(buf.getvalue()).decode()
+            return chart_b64
 
     def plot_weights(self) -> None:
-        # Construire un DataFrame : lignes = dates de rebalancement, colonnes = tickers
+        """
+        Afficher la composition de l'indice en focntion du temps.
+        """
         weights_dict = {}
         for date, comp in self.index_comp.items():
-            weights_dict[date] = comp.get_weights()
-        
-        df = pd.DataFrame(weights_dict).T  # shape : (n_dates, n_tickers)
+            if self.start <= date <= self.end:   # ← ignorer les rebalancements avant start
+                weights_dict[date] = comp.get_weights()
+
+        df = pd.DataFrame(weights_dict).T
         df = df.fillna(0.0)
 
-        # Bar chart empilé
-        fig, ax = plt.subplots(figsize=(12, 6))
+        _, ax = plt.subplots(figsize=(12, 6))
         df.plot(kind="bar", stacked=True, ax=ax, colormap="tab20")
 
         ax.set_title("Composition de l'indice à chaque rebalancement")
@@ -141,16 +223,30 @@ class BacktestResult:
         plt.tight_layout()
         plt.show()
 
-    def metrics(self):
+    def compute_metrics(self) -> None:
         """
-        Affiche les métriques principales
+        Affiche les métriques principales: performance totale, 
+        yield annuel, volatilité annuelle.
         """
-        total_return = self.values.iloc[-1] / self.values.iloc[0] - 1
-        nb_years = (self.values.index[-1] - self.values.index[0]).days / 365.25
+        # Filtrer sur [start, end] uniquement
+        values  = self._filter_to_period(self.values)
+        returns = self._filter_to_period(self.returns)
 
-        cagr = (self.values.iloc[-1] / self.values.iloc[0])**(1/nb_years) - 1
-        vol = self.returns.std() * np.sqrt(252)
+        total_return = values.iloc[-1] / values.iloc[0] - 1
+        nb_years     = (values.index[-1] - values.index[0]).days / 365.25
 
-        print(f"Total return = {100*total_return:.2f}%")
-        print(f"Compound Annual Growth Rate = {100*cagr:.2f}%")
-        print(f"Volatility = {100*vol:.2f}%")
+        cagr = (values.iloc[-1] / values.iloc[0]) ** (1 / nb_years) - 1
+        vol  = returns.std() * np.sqrt(252)
+        max_drawdown = - (self.values / self.values.cummax() - 1).min()
+
+        print(f"Total return                 = {100 * total_return:.2f}%")
+        print(f"Compound Annual Growth Rate  = {100 * cagr:.2f}%")
+        print(f"Annual Volatility            = {100 * vol:.2f}%")
+        print(f"Maximum Drawdown             = {100 * max_drawdown:.2f}%")
+
+        self.metrics = [
+            Metric("Compound Annual Growth Rate", cagr),
+            Metric("Total return", total_return),
+            Metric("Annual Volatility", vol),
+            Metric("Maximum Drawdown", max_drawdown)
+        ]

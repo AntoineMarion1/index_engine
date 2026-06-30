@@ -5,3 +5,5 @@ numpy
 yfinance
 cvxpy
 pytest
+jinja2
+weasyprint

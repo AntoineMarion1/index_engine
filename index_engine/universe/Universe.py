@@ -91,6 +91,23 @@ class Universe:
         # sinon pas de jour suivant disponible
         return pd.NaT
     
+    def get_previous_market_day(self, date: pd.Timestamp) -> pd.Timestamp:
+        """
+        Renvoie le premier jour de marché avant la date donnée. Renvoie NaT
+        s'il n'y en n'a pas.
+        """
+        market_days = self.get_market_days().sort_values()
+
+        # position d'insertion strictement après la date
+        pos = market_days.searchsorted(date, side="left")
+
+        # s'il existe un jour précédent
+        if pos < len(market_days):
+            return market_days[pos]
+
+        # sinon pas de jour précédent disponible
+        return pd.NaT
+    
     def get_first_market_day(self, asset: Asset) -> pd.Timestamp:
         """
         Renvoie le premier jour de cotation du marché de l'asset.

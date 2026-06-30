@@ -8,17 +8,26 @@ from index_engine.backtest import BacktestResult
 import pandas as pd 
 
 class Index:
+    """
+    Indice
+    """
     def __init__(
-            self, 
+            self,
+            name: str,
             universe: Universe,
-            filters: list, 
-            scorer: ScoringFactor, 
-            selector: Selector, 
-            weighter: WeightingStrategy, 
-            constraints: list, 
+            base_date: pd.Timestamp,
+            base_value: float,
+            filters: list,
+            scorer: ScoringFactor,
+            selector: Selector,
+            weighter: WeightingStrategy,
+            constraints: list,
             rule: RebalanceRule
         ):
-        self.universe = universe
+        self.name: str = name
+        self.universe : Universe = universe
+        self.base_date = base_date
+        self.base_value = base_value
         self.filters = filters
         self.scorer = scorer
         self.selector = selector
@@ -26,9 +35,11 @@ class Index:
         self.constraints = constraints
         self.rule = rule
         self.index_composition = None
-        self.basis = 100 # valeur initiale de l'indice
 
     def compute(self, date: pd.Timestamp | str)->IndexComposition:
+        """
+        Calculer la valeur de l'indice à une date donnée.
+        """
         date = pd.Timestamp(date) # gérer le cas ou on passse une date en paramètre de la fonction
 
         #le masque ne contient pour le moment que des 1, car on garde tous les assets
@@ -42,8 +53,8 @@ class Index:
         weights = pd.Series([1/n] * n)
 
         # FILTERING
-        for filter in self.filters:
-            new_mask = filter.apply(self.universe, date)
+        for f in self.filters:
+            new_mask = f.apply(self.universe, date)
             mask  = mask & new_mask
 
         # RANKING
@@ -81,22 +92,25 @@ class Index:
         return pd.Series(res_dict)
     
     def backtest(
-            self, 
-            start: str | pd.Timestamp, 
+            self,
+            start: str | pd.Timestamp,
             end: str | pd.Timestamp
             )->BacktestResult:
         """
         Renvoie un objet backtest result contenant les 
         compositions d'indice à chaque date de rebalancement.
         """
+        adjusted_base_date = self.universe.get_next_market_day(self.base_date)
+        # ajuster le début du backtest au marché
         start = self.universe.get_next_market_day(pd.Timestamp(start))
-        end = pd.Timestamp(end)
+        # ajuster la fin du backtest au marché
+        end = self.universe.get_previous_market_day(pd.Timestamp(end))
 
         # Il faut calculer la composition de l'indice le jour de son lancement
         # on l'ajoute donc à la liste des dates de rebalancement.
         rebalance_dates = (
-            pd.DatetimeIndex([start])
-            .append(self.rule.get_rebalance_dates(start, end))
+            pd.DatetimeIndex([adjusted_base_date])
+            .append(self.rule.get_rebalance_dates(adjusted_base_date, end))
             .unique()
             .sort_values()
         )
@@ -105,13 +119,15 @@ class Index:
         print(rebalance_dates)
 
         # Créer un objet BacktestResult pour tout sauvegarder.
-        result = BacktestResult(self.universe, rebalance_dates, start, end)
+        result = BacktestResult(
+            self.name, self.universe, self.base_date, self.base_value,
+            rebalance_dates, start, end
+        )
 
         # Ajouter la composition de l'indice à chaque rebalancement
         for date in rebalance_dates:
             result.add_rebalance(date, self.compute(date))
 
         # Calculer la valeur de l'indice à chaque date de cotation.
-        result._compute_index_values(self.basis)
+        result.compute_index_values()
         return result
-    

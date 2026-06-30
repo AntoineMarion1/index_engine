@@ -1,0 +1,15 @@
+<h1>{{ index_name }}</h1>
+<p>CAGR : {{ cagr }}%</p>
+
+<img src="data:image/png;base64,{{ chart_perf }}" style="width:100%; max-width:900px;" />
+
+<img src="data:image/png;base64,{{ chart_drawdown }}" style="width:100%; max-width:900px;" />
+
+<table>
+{% for metric in metrics %}
+<tr>
+  <td>{{ metric.name }}</td>
+  <td>{{ metric.value }}</td>
+</tr>
+{% endfor %}
+</table>

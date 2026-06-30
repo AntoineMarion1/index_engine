@@ -42,3 +42,6 @@ self.mask
 
 valeurs possibles pour les rebalance rules: celles des offset aliases de la freq de date range
 https://pandas.pydata.org/docs/user_guide/timeseries.html#timeseries-offset-aliases
+
+
+ATTENTION: base date est différente de la date de backtest
